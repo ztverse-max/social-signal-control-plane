@@ -1,0 +1,11 @@
+﻿[
+  {
+    "externalId": "wb-2001",
+    "authorId": "weibo-hot",
+    "authorName": "Weibo Hot",
+    "title": "Breaking topic",
+    "content": "A monitored account published a trending thread.",
+    "url": "https://example.com/weibo/wb-2001",
+    "publishedAt": "2026-03-15T08:01:00.000Z"
+  }
+]

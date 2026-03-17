@@ -1,0 +1,20 @@
+﻿[
+  {
+    "externalId": "dy-1001",
+    "authorId": "douyin-tech",
+    "authorName": "Douyin Tech",
+    "title": "AI camera update",
+    "content": "A new short video about creator workflow is live.",
+    "url": "https://example.com/douyin/dy-1001",
+    "publishedAt": "2026-03-15T08:00:00.000Z"
+  },
+  {
+    "externalId": "dy-1002",
+    "authorId": "douyin-tech",
+    "authorName": "Douyin Tech",
+    "title": "Studio tips",
+    "content": "A second post shows how to speed up editing.",
+    "url": "https://example.com/douyin/dy-1002",
+    "publishedAt": "2026-03-15T08:02:00.000Z"
+  }
+]

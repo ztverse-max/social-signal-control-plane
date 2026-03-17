@@ -1,0 +1,15 @@
+node_modules/
+coverage/
+dist/
+.env
+.env.*
+!.env.example
+data/browser/*.json
+data/runtime-state.json
+output/
+tmp/
+.playwright-cli/
+.tmp-news-*.log
+*.log
+*.tmp
+.DS_Store

@@ -1,0 +1,41 @@
+{
+  "name": "social-signal-control-plane",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Plugin-based social platform monitoring and multi-channel push hub for Douyin, Weibo, WeChat Official Accounts, and Xiaohongshu.",
+  "type": "module",
+  "author": "0xcby",
+  "license": "MIT",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "auth:douyin": "node scripts/platform-auth.js --platform douyin",
+    "auth:wechat": "node scripts/platform-auth.js --platform wechat",
+    "auth:weibo": "node scripts/platform-auth.js --platform weibo",
+    "auth:xiaohongshu": "node scripts/xiaohongshu-auth.js",
+    "test": "node --test --experimental-test-isolation=none"
+  },
+  "keywords": [
+    "news-monitoring",
+    "douyin",
+    "weibo",
+    "wechat",
+    "xiaohongshu",
+    "telegram",
+    "webhook",
+    "plugin-system",
+    "sse",
+    "playwright"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ztverse-max/social-signal-control-plane.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ztverse-max/social-signal-control-plane/issues"
+  },
+  "homepage": "https://github.com/ztverse-max/social-signal-control-plane#readme",
+  "dependencies": {
+    "playwright-core": "^1.58.2"
+  }
+}
