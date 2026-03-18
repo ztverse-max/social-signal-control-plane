@@ -17,6 +17,86 @@ function sanitizePayload(input = {}) {
   );
 }
 
+function extractWecomWebhookKey(value) {
+  const text = String(value ?? "").trim();
+
+  if (!text) {
+    return "";
+  }
+
+  try {
+    return new URL(text).searchParams.get("key") ?? "";
+  } catch {}
+
+  const matched = text.match(/(?:^|[?&])key=([^&]+)/i);
+
+  if (matched?.[1]) {
+    try {
+      return decodeURIComponent(matched[1]);
+    } catch {
+      return matched[1];
+    }
+  }
+
+  return text;
+}
+
+function normalizeList(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => String(item ?? "").trim())
+      .filter(Boolean);
+  }
+
+  return String(value ?? "")
+    .split(/[\r\n,，]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function normalizeChannelPayload(channel = {}) {
+  const normalized = { ...channel };
+
+  if (normalized.pluginId === "wecom-bot") {
+    const explicitUrl = String(normalized.webhookUrl ?? normalized.url ?? "").trim();
+    const webhookKey = extractWecomWebhookKey(normalized.webhookKey);
+
+    if (webhookKey) {
+      normalized.webhookKey = webhookKey;
+    }
+
+    if (explicitUrl && !/^https?:\/\//i.test(explicitUrl)) {
+      const keyFromUrlField = extractWecomWebhookKey(explicitUrl);
+
+      if (keyFromUrlField) {
+        normalized.webhookKey = normalized.webhookKey ?? keyFromUrlField;
+        delete normalized.webhookUrl;
+        delete normalized.url;
+      }
+    }
+
+    if (normalized.messageType) {
+      normalized.messageType = String(normalized.messageType).trim().toLowerCase();
+    }
+  }
+
+  if (normalized.pluginId === "wecom-smart-bot") {
+    const chatIds = normalizeList(normalized.chatIds ?? normalized.chatId);
+
+    if (chatIds.length > 0) {
+      normalized.chatIds = chatIds.join(",");
+    }
+
+    delete normalized.chatId;
+
+    if (normalized.messageType) {
+      normalized.messageType = String(normalized.messageType).trim().toLowerCase();
+    }
+  }
+
+  return sanitizePayload(normalized);
+}
+
 function assertTargetPayload(platformId, target) {
   if (!platformId) {
     throw new Error("缺少平台标识。");
@@ -57,7 +137,7 @@ function assertChannelPayload(channel) {
   }
 
   if (channel.pluginId === "wecom-bot" && !channel.webhookKey && !channel.webhookUrl && !channel.url) {
-    throw new Error("企业微信机器人渠道需要 webhookKey 或 webhookUrl。");
+    throw new Error("企业微信机器人需要 Webhook Key 或完整 Webhook URL，不能只填机器人 ID、企业 ID 或 AgentId。");
   }
 
   if (
@@ -66,6 +146,21 @@ function assertChannelPayload(channel) {
     !["markdown", "text"].includes(String(channel.messageType).trim().toLowerCase())
   ) {
     throw new Error("企业微信机器人消息类型只支持 markdown 或 text。");
+  }
+
+  if (
+    channel.pluginId === "wecom-smart-bot" &&
+    (!channel.botId || !channel.secret || normalizeList(channel.chatIds).length === 0)
+  ) {
+    throw new Error("企业微信智能机器人需要 botId、secret 和至少一个会话 ID。");
+  }
+
+  if (
+    channel.pluginId === "wecom-smart-bot" &&
+    channel.messageType &&
+    !["markdown", "text"].includes(String(channel.messageType).trim().toLowerCase())
+  ) {
+    throw new Error("企业微信智能机器人消息类型只支持 markdown 或 text。");
   }
 }
 
@@ -77,6 +172,7 @@ function createRegistry(logger) {
 
 export async function createApp(baseConfig, { cwd = process.cwd() } = {}) {
   const logger = createLogger("news-hub");
+  const stateStore = new RuntimeStateStore({ cwd });
   const shared = {
     cwd,
     realtimeHub: new RealtimeHub({ maxRecent: baseConfig.server?.maxRecent ?? 100 }),
@@ -84,9 +180,9 @@ export async function createApp(baseConfig, { cwd = process.cwd() } = {}) {
       logger: logger.child("browser"),
       browserConfig: baseConfig.runtime?.browser ?? {},
       cwd
-    })
+    }),
+    runtimeStateStore: stateStore
   };
-  const stateStore = new RuntimeStateStore({ cwd });
   const authManager = new AuthManager({
     cwd,
     logger: logger.child("auth")
@@ -149,6 +245,9 @@ export async function createApp(baseConfig, { cwd = process.cwd() } = {}) {
     async getAuthStatuses() {
       return authManager.getStatuses(activeConfig);
     },
+    async getDiscoveredSessions() {
+      return stateStore.listDiscoveredSessions("wecom-smart-bot");
+    },
     async addTarget(platformId, payload, { previousTargetId } = {}) {
       if (!PLATFORM_DEFINITIONS.some((platform) => platform.id === platformId)) {
         throw new Error(`不支持的平台：${platformId}`);
@@ -167,7 +266,7 @@ export async function createApp(baseConfig, { cwd = process.cwd() } = {}) {
       return this.getSettingsSnapshot();
     },
     async upsertChannel(payload) {
-      const channel = sanitizePayload(payload);
+      const channel = normalizeChannelPayload(payload);
       assertChannelPayload(channel);
       await stateStore.upsertChannel(channel);
       await reloadRuntime();

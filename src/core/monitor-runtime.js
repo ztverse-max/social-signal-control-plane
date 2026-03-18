@@ -35,16 +35,17 @@ export class MonitorRuntime {
 
     for (const channelDefinition of normalizeChannelDefinitions(this.config.channels ?? {})) {
       const channelId = channelDefinition.id;
+      const pluginId = channelDefinition.pluginId ?? channelId;
       const channelConfig = channelDefinition;
 
       if (channelConfig?.enabled === false) {
         continue;
       }
 
-      const plugin = this.registry.getChannel(channelId);
+      const plugin = this.registry.getChannel(pluginId);
 
       if (!plugin) {
-        throw new Error(`未知渠道插件：${channelId}`);
+        throw new Error(`未知渠道插件：${pluginId}`);
       }
 
       const sender = await plugin.createSender({
@@ -137,6 +138,8 @@ export class MonitorRuntime {
         });
       }
     }
+
+    await this.channelManager?.close?.();
   }
 
   #scheduleWatcher(watcher, delayMs) {

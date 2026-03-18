@@ -139,11 +139,38 @@ function maskSecret(value) {
   return `${text.slice(0, 4)}***${text.slice(-4)}`;
 }
 
+function normalizeList(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => String(item ?? "").trim())
+      .filter(Boolean);
+  }
+
+  return String(value ?? "")
+    .split(/[\r\n,，]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function extractWecomWebhookKey(channel) {
   const directKey = String(channel.webhookKey ?? "").trim();
 
   if (directKey) {
-    return directKey;
+    try {
+      return new URL(directKey).searchParams.get("key") ?? directKey;
+    } catch {
+      const matched = directKey.match(/(?:^|[?&])key=([^&]+)/i);
+
+      if (matched?.[1]) {
+        try {
+          return decodeURIComponent(matched[1]);
+        } catch {
+          return matched[1];
+        }
+      }
+
+      return directKey;
+    }
   }
 
   const webhookUrl = String(channel.webhookUrl ?? channel.url ?? "").trim();
@@ -190,6 +217,14 @@ function summarizeChannel(channel) {
   if (channel.pluginId === "wecom-bot") {
     const webhookKey = extractWecomWebhookKey(channel);
     return webhookKey ? `企业微信机器人：Key ${maskSecret(webhookKey)}` : "待填写机器人 Key / Webhook URL";
+  }
+
+  if (channel.pluginId === "wecom-smart-bot") {
+    const chatIds = normalizeList(channel.chatIds ?? channel.chatId);
+    const botId = String(channel.botId ?? "").trim();
+    return botId
+      ? `企业微信智能机器人：Bot ${maskSecret(botId)} / 会话 ${chatIds.length} 个`
+      : "待填写 BotID / Secret / 会话 ID";
   }
 
   if (channel.pluginId === "webhook") {

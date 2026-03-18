@@ -58,6 +58,7 @@ flowchart LR
 | Browser Notification | 浏览器原生通知弹窗 |
 | Telegram | 通过 Bot 推送到指定会话 |
 | WeCom Bot | 通过企业微信群机器人 Webhook 推送到群聊 |
+| WeCom Smart Bot | 通过企业微信智能机器人长连接主动推送到单聊或群聊 |
 | Webhook | 推送到任意 HTTP 接收端 |
 | Console | 本地终端日志输出 |
 
@@ -115,19 +116,34 @@ npm run auth:xiaohongshu
   - 推送渠道开关与参数
 - `channels.wecom-bot`
   - 企业微信机器人配置，支持 `webhookKey` 或 `webhookUrl`
+- `channels.wecom-smart-bot`
+  - 企业微信智能机器人配置，支持 `botId + secret + chatIds`
 - `runtime.externalPlugins`
   - 外部插件加载入口
 - `runtime.browser`
   - 浏览器采集参数
 
-企业微信机器人环境变量示例：
+企业微信渠道环境变量示例：
 
 ```bash
 NEWS_WECOM_BOT_WEBHOOK_KEY=your-wecom-bot-key
 NEWS_WECOM_BOT_MESSAGE_TYPE=markdown
 NEWS_WECOM_BOT_MENTIONED_MOBILE_LIST=
 NEWS_WECOM_BOT_MENTIONED_LIST=
+NEWS_WECOM_SMART_BOT_BOT_ID=your-smart-bot-id
+NEWS_WECOM_SMART_BOT_SECRET=your-smart-bot-secret
+NEWS_WECOM_SMART_BOT_CHAT_IDS=userid_or_chatid_1,userid_or_chatid_2
+NEWS_WECOM_SMART_BOT_MESSAGE_TYPE=markdown
 ```
+
+说明：
+
+- 这里需要的是企业微信群机器人的 `Webhook Key`，也就是 Webhook 地址里 `key=` 后面的那段字符串
+- 也可以直接填写完整的 `Webhook URL`
+- `机器人 ID`、`企业 ID`、`AgentId` 不能直接用于群机器人推送
+- `WeCom Smart Bot` 是另一条独立通道，使用企业微信智能机器人的 `BotID + Secret` 建立长连接
+- `NEWS_WECOM_SMART_BOT_CHAT_IDS` 支持多个会话 ID；单聊填写用户 `userid`，群聊填写对应 `chatid`
+- 项目会在机器人收到消息或事件后，自动记录最近发现的 `userid / chatid`，可在页面“通知渠道”里直接复制或填入
 
 ## 真实时效说明
 

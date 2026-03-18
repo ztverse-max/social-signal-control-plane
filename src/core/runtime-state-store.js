@@ -5,7 +5,8 @@ import { randomUUID } from "node:crypto";
 const DEFAULT_STATE = {
   version: 1,
   customTargets: {},
-  channels: []
+  channels: [],
+  discoveredSessions: []
 };
 
 function clone(value) {
@@ -39,6 +40,31 @@ function normalizeChannel(channel = {}) {
   return {
     ...channel,
     id: channel.id ?? randomUUID()
+  };
+}
+
+function normalizeDiscoveredSession(session = {}) {
+  const channelId = String(session.channelId ?? "").trim();
+  const pluginId = String(session.pluginId ?? "").trim() || "wecom-smart-bot";
+  const sessionType = String(session.sessionType ?? "").trim() || "single";
+  const sessionId = String(session.sessionId ?? "").trim();
+  const chatId = String(session.chatId ?? "").trim();
+  const userId = String(session.userId ?? "").trim();
+  const id = session.id ?? `${pluginId}:${channelId}:${sessionType}:${sessionId}`;
+
+  return {
+    id,
+    pluginId,
+    channelId,
+    channelLabel: session.channelLabel ?? channelId,
+    botId: session.botId,
+    sessionType,
+    sessionId,
+    chatId,
+    userId,
+    messageType: session.messageType,
+    sourceType: session.sourceType,
+    lastSeenAt: session.lastSeenAt ?? new Date().toISOString()
   };
 }
 
@@ -116,6 +142,40 @@ export class RuntimeStateStore {
   async removeChannel(channelId) {
     await this.load();
     this.state.channels = this.state.channels.filter((entry) => entry.id !== channelId);
+    this.state.discoveredSessions = this.state.discoveredSessions.filter(
+      (entry) => entry.channelId !== channelId
+    );
     await this.#persist();
+  }
+
+  async upsertDiscoveredSession(session) {
+    await this.load();
+    const normalizedSession = normalizeDiscoveredSession(session);
+
+    if (!normalizedSession.channelId || !normalizedSession.sessionId) {
+      return undefined;
+    }
+
+    this.state.discoveredSessions = this.state.discoveredSessions.filter(
+      (entry) => entry.id !== normalizedSession.id
+    );
+    this.state.discoveredSessions.push(normalizedSession);
+    this.state.discoveredSessions.sort(
+      (left, right) =>
+        Date.parse(right.lastSeenAt ?? "") - Date.parse(left.lastSeenAt ?? "")
+    );
+    this.state.discoveredSessions = this.state.discoveredSessions.slice(0, 200);
+    await this.#persist();
+    return clone(normalizedSession);
+  }
+
+  async listDiscoveredSessions(pluginId) {
+    await this.load();
+
+    return clone(
+      (this.state.discoveredSessions ?? []).filter((entry) =>
+        pluginId ? entry.pluginId === pluginId : true
+      )
+    );
   }
 }

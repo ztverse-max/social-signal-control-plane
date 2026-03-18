@@ -1,3 +1,5 @@
+import { formatDisplayTime } from "../core/format-display-time.js";
+
 function normalizeText(text) {
   return String(text ?? "").replaceAll("\r\n", "\n").trim();
 }
@@ -17,17 +19,49 @@ function normalizeList(value) {
   return [];
 }
 
+function extractWebhookKey(value) {
+  const text = String(value ?? "").trim();
+
+  if (!text) {
+    return "";
+  }
+
+  try {
+    return new URL(text).searchParams.get("key") ?? "";
+  } catch {}
+
+  const matched = text.match(/(?:^|[?&])key=([^&]+)/i);
+
+  if (matched?.[1]) {
+    try {
+      return decodeURIComponent(matched[1]);
+    } catch {
+      return matched[1];
+    }
+  }
+
+  return text;
+}
+
 function resolveWebhookUrl(channelConfig = {}) {
-  if (channelConfig.webhookUrl) {
-    return String(channelConfig.webhookUrl).trim();
+  const explicitUrl = String(channelConfig.webhookUrl ?? channelConfig.url ?? "").trim();
+
+  if (explicitUrl) {
+    if (/^https?:\/\//i.test(explicitUrl)) {
+      return explicitUrl;
+    }
+
+    const webhookKeyFromUrlField = extractWebhookKey(explicitUrl);
+
+    if (webhookKeyFromUrlField) {
+      return `https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=${encodeURIComponent(webhookKeyFromUrlField)}`;
+    }
   }
 
-  if (channelConfig.url) {
-    return String(channelConfig.url).trim();
-  }
+  const webhookKey = extractWebhookKey(channelConfig.webhookKey);
 
-  if (channelConfig.webhookKey) {
-    return `https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=${encodeURIComponent(String(channelConfig.webhookKey).trim())}`;
+  if (webhookKey) {
+    return `https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=${encodeURIComponent(webhookKey)}`;
   }
 
   return "";
@@ -48,7 +82,7 @@ function formatMarkdownMessage(event) {
   const sections = [
     `## ${event.platformName} / ${event.target.label}`,
     `> 作者：${event.author.name}`,
-    `> 发布时间：${event.message?.publishedAt ?? "-"}`,
+    `> 发布时间：${formatDisplayTime(event.message?.publishedAt)}`,
     headline
   ];
 
@@ -74,7 +108,7 @@ function formatTextMessage(event) {
   return [
     `${event.platformName} / ${event.target.label}`,
     `作者：${event.author.name}`,
-    `发布时间：${event.message?.publishedAt ?? "-"}`,
+    `发布时间：${formatDisplayTime(event.message?.publishedAt)}`,
     headline,
     summary,
     event.message?.url ? `原文：${event.message.url}` : ""
@@ -113,7 +147,7 @@ export const wecomBotChannel = {
     const webhookUrl = resolveWebhookUrl(channelConfig);
 
     if (!webhookUrl) {
-      logger.warn("企业微信机器人渠道未启用，缺少 webhookKey 或 webhookUrl");
+      logger.warn("企业微信机器人渠道未启用，缺少 webhookKey 或 webhookUrl，机器人 ID 不能直接用于推送。");
 
       return {
         id: channelId,

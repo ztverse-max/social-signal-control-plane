@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import AiBot from "@wecom/aibot-node-sdk";
+
 import { buildSettingsSnapshot, mergeConfigWithState } from "../src/core/config-service.js";
 import { wecomBotChannel } from "../src/channels/wecom-bot.js";
+import { wecomSmartBotChannel } from "../src/channels/wecom-smart-bot.js";
 import { AuthManager } from "../src/core/auth-manager.js";
 import { createLogger } from "../src/core/logger.js";
 import { resolvePlatformStorageStatePath } from "../src/core/platform-auth.js";
@@ -119,6 +123,93 @@ test("runtime dispatches a message once and deduplicates on repeat polling", asy
   assert.equal(captured.length, 1);
 });
 
+test("runtime resolves custom channel instances by pluginId instead of random channel id", async () => {
+  const captured = [];
+  let createdChannelId;
+  const registry = new PluginRegistry({ logger: createSilentLogger() });
+
+  registry.register({
+    type: "platform",
+    id: "fixture-platform",
+    async createWatchers({ platformConfig }) {
+      return [
+        {
+          id: "fixture-platform:user-1",
+          target: { userId: "user-1", label: "User 1" },
+          intervalMs: 10,
+          async poll() {
+            return platformConfig.items;
+          }
+        }
+      ];
+    }
+  });
+
+  registry.register({
+    type: "channel",
+    id: "capture",
+    async createSender({ channelId }) {
+      createdChannelId = channelId;
+
+      return {
+        id: channelId,
+        async send(event) {
+          captured.push(event);
+        }
+      };
+    }
+  });
+
+  const runtime = new MonitorRuntime({
+    config: {
+      runtime: { latencyBudgetMs: 10, dedupeMaxSize: 100, emitHistoricalOnStart: true },
+      platforms: {
+        "fixture-platform": {
+          enabled: true,
+          items: [
+            {
+              dedupeKey: "fixture-platform:user-1:1",
+              platformId: "fixture-platform",
+              platformName: "Fixture Platform",
+              targetId: "user-1",
+              targetLabel: "User 1",
+              authorId: "user-1",
+              authorName: "User 1",
+              externalId: "1",
+              title: "Hello",
+              content: "World",
+              url: "https://example.com/1",
+              publishedAt: "2026-03-15T08:00:00.000Z",
+              raw: { id: 1 }
+            }
+          ]
+        }
+      },
+      channels: [
+        {
+          id: "b575c0a5-ac82-404a-bd1d-0cc2087e460f",
+          pluginId: "capture",
+          enabled: true
+        }
+      ]
+    },
+    registry,
+    sourceDriverFactory: createSourceDriverFactory(),
+    logger: createSilentLogger(),
+    shared: {
+      cwd: process.cwd(),
+      realtimeHub: new RealtimeHub()
+    }
+  });
+
+  await runtime.initialize();
+  const result = await runtime.runOnce();
+
+  assert.equal(createdChannelId, "b575c0a5-ac82-404a-bd1d-0cc2087e460f");
+  assert.equal(result.totalNewMessages, 1);
+  assert.equal(captured.length, 1);
+});
+
 test("runtime ignores startup historical messages and only dispatches newly discovered items", async () => {
   const captured = [];
   const registry = new PluginRegistry({ logger: createSilentLogger() });
@@ -223,6 +314,7 @@ test("runtime ignores startup historical messages and only dispatches newly disc
 
 test("runtime stop aborts long-running browser polls after a short timeout", async () => {
   let browserClosed = false;
+  let channelsClosed = false;
 
   const runtime = new MonitorRuntime({
     config: {
@@ -245,6 +337,12 @@ test("runtime stop aborts long-running browser polls after a short timeout", asy
       }
     }
   });
+  runtime.channelManager = {
+    async close() {
+      channelsClosed = true;
+    },
+    senders: []
+  };
 
   runtime.activeRuns.add(new Promise(() => {}));
 
@@ -252,6 +350,7 @@ test("runtime stop aborts long-running browser polls after a short timeout", asy
   await runtime.stop();
 
   assert.equal(browserClosed, true);
+  assert.equal(channelsClosed, true);
   assert.ok(Date.now() - startedAt < 250);
 });
 
@@ -563,7 +662,179 @@ test("wecom bot channel builds markdown payload from webhook key", async () => {
   const payload = JSON.parse(calls[0].options.body);
   assert.equal(payload.msgtype, "markdown");
   assert.match(payload.markdown.content, /微博 \/ 人民日报/);
+  assert.match(payload.markdown.content, /发布时间：北京时间 2026-03-17 20:00:00/);
   assert.match(payload.markdown.content, /打开原文/);
+});
+
+test("wecom bot channel accepts a full webhook url pasted into the key field", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({ url, options });
+
+    return {
+      ok: true,
+      async json() {
+        return {
+          errcode: 0,
+          errmsg: "ok"
+        };
+      }
+    };
+  };
+
+  try {
+    const sender = await wecomBotChannel.createSender({
+      channelConfig: {
+        webhookKey: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abc123xyz789",
+        messageType: "text"
+      },
+      logger: createSilentLogger()
+    });
+
+    await sender.send({
+      platformName: "微博",
+      target: { label: "人民日报" },
+      author: { name: "人民日报" },
+      message: {
+        title: "最新消息标题",
+        content: "这里是最新消息内容",
+        url: "https://example.com/post/1",
+        publishedAt: "2026-03-17T12:00:00.000Z"
+      }
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(calls.length, 1);
+  assert.equal(
+    calls[0].url,
+    "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abc123xyz789"
+  );
+  const payload = JSON.parse(calls[0].options.body);
+  assert.equal(payload.msgtype, "text");
+});
+
+test("wecom smart bot channel sends proactive messages to multiple chats and closes cleanly", async () => {
+  const originalWSClient = AiBot.WSClient;
+  const instances = [];
+  const sent = [];
+  const discovered = [];
+
+  class FakeWSClient extends EventEmitter {
+    constructor(options) {
+      super();
+      this.options = options;
+      this.disconnectCalled = false;
+      instances.push(this);
+    }
+
+    connect() {
+      queueMicrotask(() => {
+        this.emit("authenticated");
+      });
+      return this;
+    }
+
+    async sendMessage(chatId, body) {
+      sent.push({ chatId, body });
+      return {
+        chatId,
+        body
+      };
+    }
+
+    disconnect() {
+      this.disconnectCalled = true;
+    }
+  }
+
+  Object.defineProperty(AiBot, "WSClient", {
+    configurable: true,
+    writable: true,
+    value: FakeWSClient
+  });
+
+  try {
+    const sender = await wecomSmartBotChannel.createSender({
+      channelConfig: {
+        botId: "bot-12345678",
+        secret: "secret-abcdef",
+        chatIds: "zhangsan, chat-group-1",
+        messageType: "markdown",
+        label: "企业微信智能机器人"
+      },
+      logger: createSilentLogger(),
+      shared: {
+        runtimeStateStore: {
+          async upsertDiscoveredSession(session) {
+            discovered.push(session);
+          }
+        }
+      }
+    });
+
+    await sender.send({
+      platformName: "微博",
+      target: { label: "人民日报" },
+      author: { name: "人民日报" },
+      message: {
+        title: "最新消息标题",
+        content: "这里是最新消息内容",
+        url: "https://example.com/post/1",
+        publishedAt: "2026-03-18T09:30:00.000Z"
+      }
+    });
+
+    instances[0].emit("message", {
+      body: {
+        msgtype: "text",
+        chattype: "single",
+        from: { userid: "lisi" },
+        create_time: 1773826200
+      }
+    });
+    instances[0].emit("event", {
+      body: {
+        msgtype: "event",
+        chattype: "group",
+        chatid: "chat-group-9",
+        from: { userid: "wangwu" },
+        create_time: 1773826260
+      }
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    await sender.close();
+  } finally {
+    Object.defineProperty(AiBot, "WSClient", {
+      configurable: true,
+      writable: true,
+      value: originalWSClient
+    });
+  }
+
+  assert.equal(instances.length, 1);
+  assert.equal(instances[0].options.botId, "bot-12345678");
+  assert.equal(instances[0].options.secret, "secret-abcdef");
+  assert.equal(sent.length, 2);
+  assert.deepEqual(
+    sent.map((entry) => entry.chatId),
+    ["zhangsan", "chat-group-1"]
+  );
+  assert.equal(sent[0].body.msgtype, "markdown");
+  assert.match(sent[0].body.markdown.content, /微博 \/ 人民日报/);
+  assert.match(sent[0].body.markdown.content, /发布时间：北京时间 2026-03-18 17:30:00/);
+  assert.match(sent[0].body.markdown.content, /打开原文/);
+  assert.equal(discovered.length, 2);
+  assert.equal(discovered[0].sessionType, "single");
+  assert.equal(discovered[0].sessionId, "lisi");
+  assert.equal(discovered[1].sessionType, "group");
+  assert.equal(discovered[1].sessionId, "chat-group-9");
+  assert.equal(instances[0].disconnectCalled, true);
 });
 
 test("realtime hub dashboard exposes management sections and dashboard script", () => {
@@ -610,6 +881,50 @@ test("runtime state store derives custom target ids from semantic fields", async
     assert.equal(updated.targetId, "2803301702");
     assert.equal(state.customTargets.weibo.length, 1);
     assert.equal(state.customTargets.weibo[0].targetId, "2803301702");
+  } finally {
+    await fs.rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("runtime state store keeps discovered smart bot sessions sorted by latest first", async () => {
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "news-hub-smart-bot-sessions-"));
+
+  try {
+    const store = new RuntimeStateStore({ cwd });
+    await store.upsertDiscoveredSession({
+      pluginId: "wecom-smart-bot",
+      channelId: "channel-a",
+      channelLabel: "机器人A",
+      sessionType: "single",
+      sessionId: "zhangsan",
+      userId: "zhangsan",
+      lastSeenAt: "2026-03-18T10:00:00.000Z"
+    });
+    await store.upsertDiscoveredSession({
+      pluginId: "wecom-smart-bot",
+      channelId: "channel-a",
+      channelLabel: "机器人A",
+      sessionType: "group",
+      sessionId: "chat-1",
+      chatId: "chat-1",
+      lastSeenAt: "2026-03-18T10:05:00.000Z"
+    });
+    await store.upsertDiscoveredSession({
+      pluginId: "wecom-smart-bot",
+      channelId: "channel-a",
+      channelLabel: "机器人A",
+      sessionType: "single",
+      sessionId: "zhangsan",
+      userId: "zhangsan",
+      lastSeenAt: "2026-03-18T10:10:00.000Z"
+    });
+
+    const sessions = await store.listDiscoveredSessions("wecom-smart-bot");
+
+    assert.equal(sessions.length, 2);
+    assert.equal(sessions[0].sessionId, "zhangsan");
+    assert.equal(sessions[0].lastSeenAt, "2026-03-18T10:10:00.000Z");
+    assert.equal(sessions[1].sessionId, "chat-1");
   } finally {
     await fs.rm(cwd, { recursive: true, force: true });
   }

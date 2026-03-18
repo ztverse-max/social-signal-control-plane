@@ -37,4 +37,23 @@ export class ChannelManager {
       failed: results.filter((result) => result.status === "rejected").length
     };
   }
+
+  async close() {
+    const closeableSenders = this.senders.filter((sender) => typeof sender.close === "function");
+
+    if (closeableSenders.length === 0) {
+      return;
+    }
+
+    const results = await Promise.allSettled(closeableSenders.map((sender) => sender.close()));
+
+    for (const [index, result] of results.entries()) {
+      if (result.status === "rejected") {
+        this.logger.error("渠道关闭失败", {
+          channelId: closeableSenders[index].id,
+          error: result.reason?.message ?? String(result.reason)
+        });
+      }
+    }
+  }
 }

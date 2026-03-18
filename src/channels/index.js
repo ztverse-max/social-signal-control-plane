@@ -2,6 +2,7 @@ import { browserSseChannel } from "./browser-sse.js";
 import { consoleChannel } from "./console.js";
 import { telegramChannel } from "./telegram.js";
 import { wecomBotChannel } from "./wecom-bot.js";
+import { wecomSmartBotChannel } from "./wecom-smart-bot.js";
 import { webhookChannel } from "./webhook.js";
 
 export const builtinChannelPlugins = [
@@ -9,5 +10,6 @@ export const builtinChannelPlugins = [
   browserSseChannel,
   telegramChannel,
   wecomBotChannel,
+  wecomSmartBotChannel,
   webhookChannel
 ];

@@ -26,6 +26,7 @@ const state = {
   messages: [],
   settings: { platforms: [], channels: [] },
   authStatuses: [],
+  discoveredSessions: [],
   notificationEnabled: window.localStorage.getItem("news:browserNotificationEnabled") === "true",
   editingTarget: undefined,
   editingChannelId: undefined
@@ -71,6 +72,8 @@ const elements = {
   channelSubmitText: document.getElementById("channel-submit-text"),
   channelCancel: document.getElementById("channel-cancel"),
   managedChannels: document.getElementById("managed-channels"),
+  discoveredSessions: document.getElementById("discovered-sessions"),
+  refreshDiscoveredSessions: document.getElementById("refresh-discovered-sessions"),
   toast: document.getElementById("toast")
 };
 
@@ -123,6 +126,91 @@ function requestJson(url, options = {}) {
     }
     return payload;
   });
+}
+
+function extractWecomWebhookKey(value) {
+  const text = String(value ?? "").trim();
+
+  if (!text) {
+    return "";
+  }
+
+  try {
+    return new URL(text).searchParams.get("key") ?? "";
+  } catch {}
+
+  const matched = text.match(/(?:^|[?&])key=([^&]+)/i);
+
+  if (matched?.[1]) {
+    try {
+      return decodeURIComponent(matched[1]);
+    } catch {
+      return matched[1];
+    }
+  }
+
+  return text;
+}
+
+function normalizeDelimitedList(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => String(item ?? "").trim())
+      .filter(Boolean)
+      .join(",");
+  }
+
+  return String(value ?? "")
+    .split(/[\r\n,，]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .join(",");
+}
+
+function normalizeChannelPayload(payload) {
+  const normalized = { ...payload };
+
+  if (normalized.pluginId === "wecom-bot") {
+    const explicitUrl = String(normalized.webhookUrl ?? normalized.url ?? "").trim();
+    const webhookKey = extractWecomWebhookKey(normalized.webhookKey);
+
+    if (webhookKey) {
+      normalized.webhookKey = webhookKey;
+    }
+
+    if (explicitUrl && !/^https?:\/\//i.test(explicitUrl)) {
+      const keyFromUrlField = extractWecomWebhookKey(explicitUrl);
+
+      if (keyFromUrlField) {
+        normalized.webhookKey = normalized.webhookKey ?? keyFromUrlField;
+        delete normalized.webhookUrl;
+        delete normalized.url;
+      }
+    }
+
+    if (!normalized.webhookKey && !explicitUrl) {
+      throw new Error("企业微信机器人需要 Webhook Key 或完整 Webhook URL，不能只填机器人 ID。");
+    }
+
+    if (explicitUrl && !/^https?:\/\//i.test(explicitUrl) && !normalized.webhookKey) {
+      throw new Error("Webhook URL 需要填写完整地址；如果你拿到的是 key，请填到“机器人 Webhook Key”。");
+    }
+  }
+
+  if (normalized.pluginId === "wecom-smart-bot") {
+    normalized.chatIds = normalizeDelimitedList(normalized.chatIds ?? normalized.chatId);
+    delete normalized.chatId;
+
+    if (!normalized.botId || !normalized.secret || !normalized.chatIds) {
+      throw new Error("企业微信智能机器人需要 botId、secret 和至少一个会话 ID。");
+    }
+
+    if (normalized.messageType) {
+      normalized.messageType = String(normalized.messageType).trim().toLowerCase();
+    }
+  }
+
+  return normalized;
 }
 
 function getPlatformDefinition(platformId) {
@@ -283,14 +371,44 @@ function channelTypes() {
       pluginId: "wecom-bot",
       fields: [
         { key: "label", label: "渠道名称", placeholder: "例如：企业微信机器人" },
-        { key: "webhookKey", label: "机器人 Key", placeholder: "与 Webhook URL 二选一" },
+        { key: "webhookKey", label: "机器人 Webhook Key", placeholder: "只填 key= 后面的字符串，不是机器人 ID" },
         { key: "webhookUrl", label: "Webhook URL", placeholder: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..." },
         { key: "messageType", label: "消息类型", placeholder: "markdown 或 text，默认 markdown" },
         { key: "mentionedMobileList", label: "提醒手机号", placeholder: "可选，逗号分隔，text 模式支持 @all" },
         { key: "mentionedList", label: "提醒成员 UserId", placeholder: "可选，逗号分隔，仅 text 模式生效" }
       ]
+    },
+    {
+      pluginId: "wecom-smart-bot",
+      fields: [
+        { key: "label", label: "渠道名称", placeholder: "例如：企业微信智能机器人" },
+        { key: "botId", label: "BotID", placeholder: "企业微信后台生成的 bot id" },
+        { key: "secret", label: "Secret", placeholder: "企业微信后台生成的 secret" },
+        { key: "chatIds", label: "会话 ID", placeholder: "单聊填 userid，群聊填 chatid，多个用逗号分隔" },
+        { key: "messageType", label: "消息类型", placeholder: "markdown 或 text，默认 markdown" }
+      ]
     }
   ];
+}
+
+function getChannelTypeLabel(pluginId) {
+  if (pluginId === "wecom-bot") {
+    return "企业微信群机器人";
+  }
+
+  if (pluginId === "wecom-smart-bot") {
+    return "企业微信智能机器人";
+  }
+
+  if (pluginId === "webhook") {
+    return "Webhook";
+  }
+
+  if (pluginId === "telegram") {
+    return "Telegram";
+  }
+
+  return pluginId;
 }
 
 function renderChannelTypeOptions() {
@@ -298,7 +416,7 @@ function renderChannelTypeOptions() {
   const options = channelTypes();
 
   elements.channelType.innerHTML = options
-    .map((channel) => `<option value="${escapeHtml(channel.pluginId)}">${escapeHtml(channel.pluginId === "wecom-bot" ? "企业微信机器人" : channel.pluginId === "webhook" ? "Webhook" : "Telegram")}</option>`)
+    .map((channel) => `<option value="${escapeHtml(channel.pluginId)}">${escapeHtml(getChannelTypeLabel(channel.pluginId))}</option>`)
     .join("");
 
   if (options.some((channel) => channel.pluginId === previousValue)) {
@@ -590,14 +708,19 @@ function renderChannelFormFields() {
   const type = channelTypes().find((entry) => entry.pluginId === elements.channelType.value);
   const existing = state.editingChannelId ? getChannelDefinition(state.editingChannelId) : undefined;
   const config = existing?.config || {};
-  elements.channelFields.innerHTML = `<label class="field field-checkbox"><input type="checkbox" id="channel-enabled" ${config.enabled === false ? "" : "checked"} /><span>启用该通知渠道</span></label>${(type?.fields || []).map((field) => `<label class="field"><span>${escapeHtml(field.label)}</span><input type="text" data-channel-key="${escapeHtml(field.key)}" value="${escapeHtml(config[field.key] || "")}" placeholder="${escapeHtml(field.placeholder || "")}" /></label>`).join("")}`;
+  const wecomHint = type?.pluginId === "wecom-bot"
+    ? `<article class="mini"><div class="mini-head"><strong>填写说明</strong><span class="status">WECOM</span></div><p class="muted">企业微信群机器人这里需要填写 <strong>Webhook Key</strong> 或完整 <strong>Webhook URL</strong>。机器人 ID、企业 ID、AgentId 都不能直接用于推送。</p></article>`
+    : type?.pluginId === "wecom-smart-bot"
+      ? `<article class="mini"><div class="mini-head"><strong>填写说明</strong><span class="status">SMART BOT</span></div><p class="muted">企业微信智能机器人使用 <strong>BotID + Secret</strong> 建立长连接，再向指定会话主动发消息。单聊请填写用户的 <strong>userid</strong>，群聊请填写对应的 <strong>chatid</strong>，多个会话可用逗号分隔。</p></article>`
+      : "";
+  elements.channelFields.innerHTML = `<label class="field field-checkbox"><input type="checkbox" id="channel-enabled" ${config.enabled === false ? "" : "checked"} /><span>启用该通知渠道</span></label>${wecomHint}${(type?.fields || []).map((field) => `<label class="field"><span>${escapeHtml(field.label)}</span><input type="text" data-channel-key="${escapeHtml(field.key)}" value="${escapeHtml(field.key === "chatIds" ? normalizeDelimitedList(config[field.key] || config.chatId || "") : config[field.key] || "")}" placeholder="${escapeHtml(field.placeholder || "")}" /></label>`).join("")}`;
   elements.channelSubmitText.textContent = state.editingChannelId ? "更新通知渠道" : "接入通知渠道";
   elements.channelType.disabled = Boolean(state.editingChannelId);
   elements.channelCancel.hidden = !state.editingChannelId;
 }
 
 function renderManagedChannels() {
-  elements.managedChannels.innerHTML = state.settings.channels.map((channel) => `<article class="mini"><div class="mini-head"><strong>${escapeHtml(channel.label || channel.id)}</strong><span class="status">${channel.enabled ? "已启用" : "已停用"}</span></div><p class="muted">${escapeHtml(channel.pluginId)} / ${escapeHtml(channel.summary || "")}</p><div class="mini-actions">${channel.pluginId === "webhook" || channel.pluginId === "telegram" || channel.pluginId === "wecom-bot" ? `<button type="button" class="btn edit-channel" data-channel-id="${escapeHtml(channel.id)}">编辑</button>` : ""}${!channel.builtin ? `<button type="button" class="btn remove-channel" data-channel-id="${escapeHtml(channel.id)}">删除</button>` : '<span class="muted">内置渠道</span>'}</div></article>`).join("") || '<div class="empty">暂无通知渠道。</div>';
+  elements.managedChannels.innerHTML = state.settings.channels.map((channel) => `<article class="mini"><div class="mini-head"><strong>${escapeHtml(channel.label || channel.id)}</strong><span class="status">${channel.enabled ? "已启用" : "已停用"}</span></div><p class="muted">${escapeHtml(channel.pluginId)} / ${escapeHtml(channel.summary || "")}</p><div class="mini-actions">${channel.pluginId === "webhook" || channel.pluginId === "telegram" || channel.pluginId === "wecom-bot" || channel.pluginId === "wecom-smart-bot" ? `<button type="button" class="btn edit-channel" data-channel-id="${escapeHtml(channel.id)}">编辑</button>` : ""}${!channel.builtin ? `<button type="button" class="btn remove-channel" data-channel-id="${escapeHtml(channel.id)}">删除</button>` : '<span class="muted">内置渠道</span>'}</div></article>`).join("") || '<div class="empty">暂无通知渠道。</div>';
   for (const button of elements.managedChannels.querySelectorAll(".edit-channel")) {
     button.addEventListener("click", () => {
       state.editingChannelId = button.getAttribute("data-channel-id");
@@ -621,6 +744,72 @@ function renderManagedChannels() {
         showToast("通知渠道已删除。");
         await refreshSettings();
         render();
+      } catch (error) {
+        showToast(error.message, "error");
+      }
+    });
+  }
+}
+
+async function writeClipboard(text) {
+  if (!navigator.clipboard?.writeText) {
+    throw new Error("当前浏览器不支持剪贴板写入");
+  }
+
+  await navigator.clipboard.writeText(text);
+}
+
+function appendDiscoveredSessionToForm(sessionId) {
+  if (elements.channelType.value !== "wecom-smart-bot") {
+    elements.channelType.value = "wecom-smart-bot";
+    if (!state.editingChannelId) {
+      renderChannelFormFields();
+    }
+  }
+
+  const input = elements.channelFields.querySelector('[data-channel-key="chatIds"]');
+
+  if (!input) {
+    throw new Error("当前未打开企业微信智能机器人表单");
+  }
+
+  const current = normalizeDelimitedList(input.value);
+  const next = normalizeDelimitedList(current ? `${current},${sessionId}` : sessionId);
+  input.value = next;
+}
+
+function renderDiscoveredSessions() {
+  if (!elements.discoveredSessions) {
+    return;
+  }
+
+  if (state.discoveredSessions.length === 0) {
+    elements.discoveredSessions.innerHTML = '<div class="empty">暂未发现企业微信智能机器人会话。先让目标用户或目标群与机器人交互一次，再点击刷新。</div>';
+    return;
+  }
+
+  elements.discoveredSessions.innerHTML = state.discoveredSessions.map((session) => {
+    const sessionKind = session.sessionType === "group" ? "群聊 chatid" : "单聊 userid";
+    const sessionValue = session.sessionType === "group" ? session.chatId || session.sessionId : session.userId || session.sessionId;
+    return `<article class="mini"><div class="mini-head"><strong>${escapeHtml(session.channelLabel || session.channelId || "企业微信智能机器人")}</strong><span class="status">${escapeHtml(sessionKind)}</span></div><p class="muted">会话 ID：${escapeHtml(sessionValue || "-")}</p><p class="muted">来源：${escapeHtml(session.sourceType || "-")} / 最近发现：${escapeHtml(formatTime(session.lastSeenAt))}</p><div class="mini-actions"><button type="button" class="btn fill-session" data-session-id="${escapeHtml(sessionValue || "")}">填入会话 ID</button><button type="button" class="btn copy-session" data-session-id="${escapeHtml(sessionValue || "")}">复制</button></div></article>`;
+  }).join("");
+
+  for (const button of elements.discoveredSessions.querySelectorAll(".copy-session")) {
+    button.addEventListener("click", async () => {
+      try {
+        await writeClipboard(button.getAttribute("data-session-id"));
+        showToast("会话 ID 已复制。");
+      } catch (error) {
+        showToast(error.message, "error");
+      }
+    });
+  }
+
+  for (const button of elements.discoveredSessions.querySelectorAll(".fill-session")) {
+    button.addEventListener("click", () => {
+      try {
+        appendDiscoveredSessionToForm(button.getAttribute("data-session-id"));
+        showToast("会话 ID 已填入企业微信智能机器人表单。");
       } catch (error) {
         showToast(error.message, "error");
       }
@@ -665,6 +854,7 @@ function render() {
   renderAuthStatuses();
   renderChannelFormFields();
   renderManagedChannels();
+  renderDiscoveredSessions();
   renderNotificationStatus();
 }
 
@@ -693,6 +883,7 @@ async function refreshSettings() {
   const previousChannelType = elements.channelType.value;
   state.settings = { platforms: payload.platforms || [], channels: payload.channels || [] };
   state.authStatuses = payload.authStatuses || [];
+  state.discoveredSessions = payload.discoveredSessions || [];
   renderChannelTypeOptions();
   elements.monitorPlatform.innerHTML = state.settings.platforms.map((platform) => `<option value="${escapeHtml(platform.id)}">${escapeHtml(platform.name)}</option>`).join("");
   if (state.editingTarget && !getPlatformTarget(state.editingTarget.platformId, state.editingTarget.targetId)) {
@@ -790,6 +981,15 @@ function bindEvents() {
     render();
   });
   elements.notificationButton.addEventListener("click", enableBrowserNotification);
+  elements.refreshDiscoveredSessions?.addEventListener("click", async () => {
+    try {
+      await refreshSettings();
+      render();
+      showToast("已刷新发现的会话 ID。");
+    } catch (error) {
+      showToast(error.message, "error");
+    }
+  });
   elements.monitorPlatform.addEventListener("change", () => {
     if (!state.editingTarget) {
       renderTargetFormFields();
@@ -823,13 +1023,14 @@ function bindEvents() {
   elements.channelForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
-      const payload = { id: state.editingChannelId, pluginId: elements.channelType.value, enabled: document.getElementById("channel-enabled")?.checked ?? true };
+      let payload = { id: state.editingChannelId, pluginId: elements.channelType.value, enabled: document.getElementById("channel-enabled")?.checked ?? true };
       for (const input of elements.channelFields.querySelectorAll("[data-channel-key]")) {
         const value = input.value.trim();
         if (value) {
           payload[input.getAttribute("data-channel-key")] = value;
         }
       }
+      payload = normalizeChannelPayload(payload);
       await requestJson("/api/channels", { method: "POST", body: JSON.stringify({ channel: payload }) });
       resetChannelEditor();
       await refreshSettings();

@@ -79,6 +79,20 @@ export default {
       mentionedList: process.env.NEWS_WECOM_BOT_MENTIONED_LIST,
       mentionedMobileList: process.env.NEWS_WECOM_BOT_MENTIONED_MOBILE_LIST
     },
+    "wecom-smart-bot": {
+      enabled: false,
+      label: "企业微信智能机器人",
+      botId: process.env.NEWS_WECOM_SMART_BOT_BOT_ID,
+      secret: process.env.NEWS_WECOM_SMART_BOT_SECRET,
+      chatIds: process.env.NEWS_WECOM_SMART_BOT_CHAT_IDS,
+      messageType: process.env.NEWS_WECOM_SMART_BOT_MESSAGE_TYPE ?? "markdown",
+      connectTimeoutMs: process.env.NEWS_WECOM_SMART_BOT_CONNECT_TIMEOUT_MS,
+      sendTimeoutMs: process.env.NEWS_WECOM_SMART_BOT_SEND_TIMEOUT_MS,
+      reconnectInterval: process.env.NEWS_WECOM_SMART_BOT_RECONNECT_INTERVAL,
+      maxReconnectAttempts: process.env.NEWS_WECOM_SMART_BOT_MAX_RECONNECT_ATTEMPTS,
+      heartbeatInterval: process.env.NEWS_WECOM_SMART_BOT_HEARTBEAT_INTERVAL,
+      requestTimeout: process.env.NEWS_WECOM_SMART_BOT_REQUEST_TIMEOUT
+    },
     webhook: {
       enabled: false,
       url: process.env.NEWS_WEBHOOK_URL

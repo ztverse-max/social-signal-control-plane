@@ -121,7 +121,15 @@ export function createHttpServer({ config, shared, logger, appContext }) {
       if (url.pathname === "/settings") {
         sendJson(response, 200, {
           ...appContext.getSettingsSnapshot(),
-          authStatuses: await appContext.getAuthStatuses()
+          authStatuses: await appContext.getAuthStatuses(),
+          discoveredSessions: await appContext.getDiscoveredSessions()
+        });
+        return;
+      }
+
+      if (url.pathname === "/api/wecom-smart-bot/sessions") {
+        sendJson(response, 200, {
+          items: await appContext.getDiscoveredSessions()
         });
         return;
       }

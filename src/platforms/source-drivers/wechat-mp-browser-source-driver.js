@@ -2,6 +2,7 @@ import { resolveOptionalStorageStatePath } from "../../core/platform-auth.js";
 import { createStableId, normalizeWhitespace, stripHtml, toIsoTime } from "./text-utils.js";
 
 const MP_LOGIN_URL = "https://mp.weixin.qq.com/";
+const MP_HOME_URL = "https://mp.weixin.qq.com/cgi-bin/home?t=home/index&lang=zh_CN";
 const JSON_HEADERS = {
   accept: "application/json, text/plain, */*",
   "x-requested-with": "XMLHttpRequest"
@@ -217,6 +218,11 @@ export function parseWechatMpAppmsgResponse(payload, target = {}, account = {}) 
   return items;
 }
 
+function isRetryableWechatError(error) {
+  const message = String(error?.message ?? error);
+  return /ERR_CONNECTION_CLOSED|ERR_HTTP2_PROTOCOL_ERROR|ECONNRESET|ETIMEDOUT|socket hang up|Timeout \d+ms exceeded/i.test(message);
+}
+
 async function fetchWechatMpJson(page, pathname, params) {
   const response = await page.evaluate(
     async ({ nextPathname, nextParams, nextHeaders }) => {
@@ -258,21 +264,44 @@ async function fetchWechatMpJson(page, pathname, params) {
   return payload;
 }
 
-async function ensureWechatMpReady(page, timeoutMs, waitAfterLoadMs) {
-  await page.goto(MP_LOGIN_URL, {
-    waitUntil: "domcontentloaded",
-    timeout: timeoutMs
-  });
-  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
-  await page.waitForTimeout(waitAfterLoadMs);
+async function ensureWechatMpReady(page, timeoutMs, waitAfterLoadMs, retryCount, retryDelayMs) {
+  let lastError;
 
-  const token = extractWechatMpToken(page.url());
+  for (let attempt = 1; attempt <= retryCount; attempt += 1) {
+    for (const entryUrl of [MP_HOME_URL, MP_LOGIN_URL]) {
+      try {
+        await page.goto(entryUrl, {
+          timeout: timeoutMs,
+          waitUntil: "commit"
+        });
+        await page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => {});
+        await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+        await page.waitForTimeout(waitAfterLoadMs);
+        const token = extractWechatMpToken(page.url());
 
-  if (!token) {
-    throw new Error("微信公众号平台登录态无效，请先重新登录。");
+        if (token) {
+          return token;
+        }
+      } catch (error) {
+        lastError = error;
+
+        if (!isRetryableWechatError(error) || attempt === retryCount) {
+          throw error;
+        }
+      }
+    }
+
+    if (attempt < retryCount) {
+      await page.goto("about:blank").catch(() => {});
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+    }
   }
 
-  return token;
+  if (lastError) {
+    throw lastError;
+  }
+
+  throw new Error("微信公众号平台登录态无效，请先重新登录。");
 }
 
 export function createWechatMpBrowserSourceDriver({ driverConfig = {}, context }) {
@@ -281,6 +310,8 @@ export function createWechatMpBrowserSourceDriver({ driverConfig = {}, context }
     async fetchItems({ target }) {
       const timeoutMs = driverConfig.timeoutMs ?? 90_000;
       const waitAfterLoadMs = driverConfig.waitAfterLoadMs ?? 2_000;
+      const readyRetryCount = driverConfig.readyRetryCount ?? 3;
+      const readyRetryDelayMs = driverConfig.readyRetryDelayMs ?? 1_500;
       const limit = target.limit ?? driverConfig.count ?? 10;
       const searchCount = driverConfig.searchCount ?? 10;
       const storageStatePath = await resolveOptionalStorageStatePath(
@@ -297,7 +328,13 @@ export function createWechatMpBrowserSourceDriver({ driverConfig = {}, context }
           storageStatePath
         },
         async ({ page }) => {
-          const token = await ensureWechatMpReady(page, timeoutMs, waitAfterLoadMs);
+          const token = await ensureWechatMpReady(
+            page,
+            timeoutMs,
+            waitAfterLoadMs,
+            readyRetryCount,
+            readyRetryDelayMs
+          );
           const keyword = getSearchKeyword(target);
           const selectedAccount = {
             fakeId: String(target.fakeId ?? ""),
@@ -306,16 +343,20 @@ export function createWechatMpBrowserSourceDriver({ driverConfig = {}, context }
           };
 
           if (!target.fakeId) {
-            const searchPayload = await fetchWechatMpJson(page, "/cgi-bin/searchbiz", {
-              action: "search_biz",
-              begin: 0,
-              count: searchCount,
-              query: keyword,
-              token,
-              lang: "zh_CN",
-              f: "json",
-              ajax: 1
-            });
+            const searchPayload = await fetchWechatMpJson(
+              page,
+              "/cgi-bin/searchbiz",
+              {
+                action: "search_biz",
+                begin: 0,
+                count: searchCount,
+                query: keyword,
+                token,
+                lang: "zh_CN",
+                f: "json",
+                ajax: 1
+              }
+            );
             const searchError = readWechatError(searchPayload, "微信公众号账号搜索");
 
             if (searchError) {
@@ -331,17 +372,21 @@ export function createWechatMpBrowserSourceDriver({ driverConfig = {}, context }
             Object.assign(selectedAccount, matchedAccount);
           }
 
-          const publishPayload = await fetchWechatMpJson(page, "/cgi-bin/appmsgpublish", {
-            sub: "list",
-            sub_action: "list_ex",
-            begin: 0,
-            count: limit,
-            fakeid: selectedAccount.fakeId,
-            token,
-            lang: "zh_CN",
-            f: "json",
-            ajax: 1
-          });
+          const publishPayload = await fetchWechatMpJson(
+            page,
+            "/cgi-bin/appmsgpublish",
+            {
+              sub: "list",
+              sub_action: "list_ex",
+              begin: 0,
+              count: limit,
+              fakeid: selectedAccount.fakeId,
+              token,
+              lang: "zh_CN",
+              f: "json",
+              ajax: 1
+            }
+          );
           const publishError = readWechatError(publishPayload, "微信公众号文章列表抓取");
 
           if (publishError) {
@@ -351,17 +396,21 @@ export function createWechatMpBrowserSourceDriver({ driverConfig = {}, context }
           let items = parseWechatMpPublishResponse(publishPayload, target, selectedAccount);
 
           if (items.length === 0) {
-            const fallbackPayload = await fetchWechatMpJson(page, "/cgi-bin/appmsg", {
-              action: "list_ex",
-              begin: 0,
-              count: limit,
-              fakeid: selectedAccount.fakeId,
-              type: 9,
-              token,
-              lang: "zh_CN",
-              f: "json",
-              ajax: 1
-            });
+            const fallbackPayload = await fetchWechatMpJson(
+              page,
+              "/cgi-bin/appmsg",
+              {
+                action: "list_ex",
+                begin: 0,
+                count: limit,
+                fakeid: selectedAccount.fakeId,
+                type: 9,
+                token,
+                lang: "zh_CN",
+                f: "json",
+                ajax: 1
+              }
+            );
             const fallbackError = readWechatError(fallbackPayload, "微信公众号文章列表抓取");
 
             if (fallbackError) {
