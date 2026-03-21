@@ -152,6 +152,27 @@ npm run auth:agent -- --server https://your-domain.example --token your-random-t
 - 等待约 `20 秒` 后，你可以再次点击重新创建任务
 - 页面 Dashboard 里也会直接提示 agent 是否在线
 
+## 浏览器后台通知
+
+项目现在支持 `Web Push + Service Worker`。这和原来的“页面开着时用 SSE 调用 `Notification`”不是一回事。
+
+启用后：
+
+- 页面开着时，实时消息仍然会正常刷新
+- 页面关闭后，只要浏览器进程还在，仍然可以收到系统通知
+- 推送订阅保存在服务器运行态中，服务端发现新消息后会直接推送到浏览器
+
+实现文件：
+
+- [src/core/web-push-manager.js](src/core/web-push-manager.js)
+- [src/core/web-push-sw.js](src/core/web-push-sw.js)
+
+说明：
+
+- `Web Push` 需要 `HTTPS` 或 `localhost`
+- 第一次启用时，前端会自动注册 `Service Worker`
+- 如果当前页面可见，Service Worker 会尽量不重复弹通知，避免和前台页面提醒重复
+
 ## 配置说明
 
 主配置文件位于 [config/default.config.js](config/default.config.js)。

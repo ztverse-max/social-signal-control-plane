@@ -60,8 +60,9 @@ function renderDashboardHtml(title) {
 }
 
 export class RealtimeHub {
-  constructor({ maxRecent = 100 } = {}) {
+  constructor({ maxRecent = 100, webPushManager } = {}) {
     this.maxRecent = maxRecent;
+    this.webPushManager = webPushManager;
     this.clients = new Map();
     this.recent = [];
     this.catalog = [];
@@ -130,6 +131,10 @@ export class RealtimeHub {
 
     for (const response of this.clients.values()) {
       response.write(payload);
+    }
+
+    if (this.webPushManager) {
+      void this.webPushManager.notify(event);
     }
   }
 

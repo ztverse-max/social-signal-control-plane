@@ -1,6 +1,8 @@
 import fs from "node:fs/promises";
 import http from "node:http";
 
+import { WEB_PUSH_SW_SOURCE } from "./web-push-sw.js";
+
 const DASHBOARD_CLIENT_PATH = new URL("./dashboard-client.js", import.meta.url);
 
 function parsePositiveInteger(input, fallback) {
@@ -149,6 +151,32 @@ export function createHttpServer({ config, shared, logger, appContext }) {
         return;
       }
 
+      if (url.pathname === "/api/web-push/public-key" && request.method === "GET") {
+        sendJson(response, 200, {
+          publicKey: appContext.getWebPushPublicKey()
+        });
+        return;
+      }
+
+      if (url.pathname === "/api/web-push/subscriptions" && request.method === "POST") {
+        const payload = await readJsonBody(request);
+        sendJson(
+          response,
+          200,
+          await appContext.subscribeWebPush(payload.subscription, {
+            userAgent: request.headers["user-agent"]
+          })
+        );
+        return;
+      }
+
+      if (url.pathname === "/api/web-push/subscriptions" && request.method === "DELETE") {
+        const payload = await readJsonBody(request);
+        await appContext.unsubscribeWebPush(payload.endpoint);
+        sendJson(response, 200, { ok: true });
+        return;
+      }
+
       if (url.pathname === "/api/local-auth-agent/heartbeat" && request.method === "POST") {
         const payload = await readJsonBody(request);
         sendJson(
@@ -241,6 +269,13 @@ export function createHttpServer({ config, shared, logger, appContext }) {
       if (url.pathname === "/dashboard.js") {
         const source = await fs.readFile(DASHBOARD_CLIENT_PATH, "utf8");
         sendText(response, 200, source, "application/javascript");
+        return;
+      }
+
+      if (url.pathname === "/sw.js") {
+        sendText(response, 200, WEB_PUSH_SW_SOURCE, "application/javascript", {
+          "Service-Worker-Allowed": "/"
+        });
         return;
       }
 

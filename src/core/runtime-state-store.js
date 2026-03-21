@@ -6,7 +6,11 @@ const DEFAULT_STATE = {
   version: 1,
   customTargets: {},
   channels: [],
-  discoveredSessions: []
+  discoveredSessions: [],
+  webPush: {
+    vapidKeys: undefined,
+    subscriptions: []
+  }
 };
 
 function clone(value) {
@@ -65,6 +69,22 @@ function normalizeDiscoveredSession(session = {}) {
     messageType: session.messageType,
     sourceType: session.sourceType,
     lastSeenAt: session.lastSeenAt ?? new Date().toISOString()
+  };
+}
+
+function normalizeWebPushSubscription(subscription = {}) {
+  const endpoint = String(subscription.endpoint ?? "").trim();
+
+  return {
+    endpoint,
+    expirationTime: subscription.expirationTime ?? null,
+    keys: {
+      p256dh: String(subscription.keys?.p256dh ?? "").trim(),
+      auth: String(subscription.keys?.auth ?? "").trim()
+    },
+    userAgent: String(subscription.userAgent ?? "").trim() || undefined,
+    createdAt: subscription.createdAt ?? new Date().toISOString(),
+    updatedAt: subscription.updatedAt ?? new Date().toISOString()
   };
 }
 
@@ -177,5 +197,55 @@ export class RuntimeStateStore {
         pluginId ? entry.pluginId === pluginId : true
       )
     );
+  }
+
+  async getWebPushState() {
+    await this.load();
+
+    return clone(this.state.webPush ?? { vapidKeys: undefined, subscriptions: [] });
+  }
+
+  async setWebPushVapidKeys(vapidKeys) {
+    await this.load();
+    this.state.webPush = {
+      ...(this.state.webPush ?? {}),
+      vapidKeys
+    };
+    await this.#persist();
+    return clone(vapidKeys);
+  }
+
+  async upsertWebPushSubscription(subscription) {
+    await this.load();
+    const normalized = normalizeWebPushSubscription(subscription);
+
+    if (!normalized.endpoint || !normalized.keys.p256dh || !normalized.keys.auth) {
+      throw new Error("Web Push 订阅缺少必要字段。");
+    }
+
+    const current = this.state.webPush ?? { vapidKeys: undefined, subscriptions: [] };
+    current.subscriptions = (current.subscriptions ?? []).filter(
+      (entry) => entry.endpoint !== normalized.endpoint
+    );
+    current.subscriptions.push(normalized);
+    current.subscriptions = current.subscriptions.slice(-500);
+    this.state.webPush = current;
+    await this.#persist();
+    return clone(normalized);
+  }
+
+  async removeWebPushSubscription(endpoint) {
+    await this.load();
+    const current = this.state.webPush ?? { vapidKeys: undefined, subscriptions: [] };
+    current.subscriptions = (current.subscriptions ?? []).filter(
+      (entry) => entry.endpoint !== endpoint
+    );
+    this.state.webPush = current;
+    await this.#persist();
+  }
+
+  async listWebPushSubscriptions() {
+    await this.load();
+    return clone(this.state.webPush?.subscriptions ?? []);
   }
 }

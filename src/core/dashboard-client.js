@@ -27,6 +27,7 @@ const state = {
   settings: { platforms: [], channels: [] },
   authStatuses: [],
   localAuthAgent: { enabled: false, online: false, pendingTasks: 0 },
+  webPushSubscribed: false,
   discoveredSessions: [],
   notificationEnabled: window.localStorage.getItem("news:browserNotificationEnabled") === "true",
   editingTarget: undefined,
@@ -849,15 +850,20 @@ function renderDiscoveredSessions() {
 }
 
 function renderNotificationStatus() {
+  const supportsWebPush =
+    window.isSecureContext &&
+    "serviceWorker" in navigator &&
+    "PushManager" in window &&
+    "Notification" in window;
   const permission = window.Notification ? Notification.permission : "unsupported";
-  if (permission === "unsupported") {
-    elements.notificationStatus.textContent = "当前浏览器不支持系统通知。";
+  if (!supportsWebPush || permission === "unsupported") {
+    elements.notificationStatus.textContent = "当前浏览器或当前访问环境不支持 Web Push 通知。";
     elements.notificationButton.textContent = "当前浏览器不支持";
     elements.notificationButton.disabled = true;
     return;
   }
-  if (permission === "granted" && state.notificationEnabled) {
-    elements.notificationStatus.textContent = "浏览器通知已启用，发现新消息时会立即弹出系统通知。";
+  if (permission === "granted" && state.notificationEnabled && state.webPushSubscribed) {
+    elements.notificationStatus.textContent = "Web Push 通知已启用。即使关闭当前页面，浏览器仍可接收新消息提醒。";
     elements.notificationButton.textContent = "通知已启用";
     elements.notificationButton.disabled = true;
     return;
@@ -868,9 +874,61 @@ function renderNotificationStatus() {
     elements.notificationButton.disabled = true;
     return;
   }
-  elements.notificationStatus.textContent = state.notificationEnabled ? "通知开关已打开，等待浏览器完成权限授权。" : "点击按钮后，浏览器会请求通知权限。";
+  elements.notificationStatus.textContent = state.notificationEnabled
+    ? "通知权限已允许，但当前浏览器还没有完成 Web Push 订阅。"
+    : "点击按钮后，浏览器会请求通知权限并注册后台推送。";
   elements.notificationButton.textContent = "启用浏览器通知";
   elements.notificationButton.disabled = false;
+}
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replaceAll("-", "+").replaceAll("_", "/");
+  const rawData = window.atob(base64);
+
+  return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)));
+}
+
+async function ensureWebPushSubscription(requestPermission = false) {
+  if (!window.isSecureContext || !("serviceWorker" in navigator) || !("PushManager" in window) || !window.Notification) {
+    state.webPushSubscribed = false;
+    return false;
+  }
+
+  let permission = Notification.permission;
+
+  if (requestPermission && permission !== "granted") {
+    permission = await Notification.requestPermission();
+  }
+
+  if (permission !== "granted") {
+    state.notificationEnabled = false;
+    state.webPushSubscribed = false;
+    window.localStorage.setItem("news:browserNotificationEnabled", "false");
+    return false;
+  }
+
+  const registration = await navigator.serviceWorker.register("/sw.js");
+  const readyRegistration = await navigator.serviceWorker.ready;
+  const publicKeyPayload = await requestJson("/api/web-push/public-key");
+  let subscription = await readyRegistration.pushManager.getSubscription();
+
+  if (!subscription) {
+    subscription = await readyRegistration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(publicKeyPayload.publicKey)
+    });
+  }
+
+  await requestJson("/api/web-push/subscriptions", {
+    method: "POST",
+    body: JSON.stringify({ subscription })
+  });
+
+  state.notificationEnabled = true;
+  state.webPushSubscribed = true;
+  window.localStorage.setItem("news:browserNotificationEnabled", "true");
+  return true;
 }
 
 function render() {
@@ -961,19 +1019,24 @@ function startAuthStatusPolling() {
 }
 
 async function enableBrowserNotification() {
-  if (!window.Notification) {
-    showToast("当前浏览器不支持系统通知。", "error");
-    return;
+  try {
+    const subscribed = await ensureWebPushSubscription(true);
+    renderNotificationStatus();
+    showToast(subscribed ? "浏览器通知已开启。" : "浏览器通知未开启。", subscribed ? "info" : "error");
+  } catch (error) {
+    state.webPushSubscribed = false;
+    renderNotificationStatus();
+    showToast(error.message, "error");
   }
-  const permission = await Notification.requestPermission();
-  state.notificationEnabled = permission === "granted";
-  window.localStorage.setItem("news:browserNotificationEnabled", String(state.notificationEnabled));
-  renderNotificationStatus();
-  showToast(state.notificationEnabled ? "浏览器通知已开启。" : "浏览器通知未开启。", state.notificationEnabled ? "info" : "error");
 }
 
 function sendBrowserNotification(event) {
-  if (!state.notificationEnabled || !window.Notification || Notification.permission !== "granted") {
+  if (
+    state.webPushSubscribed ||
+    !state.notificationEnabled ||
+    !window.Notification ||
+    Notification.permission !== "granted"
+  ) {
     return;
   }
   const title = event.message?.title || event.message?.content || "检测到新消息";
@@ -1086,9 +1149,15 @@ async function boot() {
   try {
     hydrateStateFromUrl();
     await refreshDashboardData();
+    if (state.notificationEnabled) {
+      await ensureWebPushSubscription(false).catch(() => {
+        state.webPushSubscribed = false;
+      });
+    }
     bindEvents();
     startAuthStatusPolling();
     connectRealtimeEvents();
+    renderNotificationStatus();
   } catch (error) {
     elements.stream.innerHTML = `<div class="empty">页面初始化失败：${escapeHtml(error?.message || String(error))}</div>`;
   }

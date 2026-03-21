@@ -9,6 +9,7 @@ import { PluginRegistry } from "../core/plugin-registry.js";
 import { RealtimeHub } from "../core/realtime-hub.js";
 import { RuntimeStateStore } from "../core/runtime-state-store.js";
 import { AuthManager } from "../core/auth-manager.js";
+import { WebPushManager } from "../core/web-push-manager.js";
 import { createSourceDriverFactory } from "../platforms/source-drivers/index.js";
 
 function sanitizePayload(input = {}) {
@@ -173,15 +174,24 @@ function createRegistry(logger) {
 export async function createApp(baseConfig, { cwd = process.cwd() } = {}) {
   const logger = createLogger("news-hub");
   const stateStore = new RuntimeStateStore({ cwd });
+  const webPushManager = new WebPushManager({
+    stateStore,
+    logger: logger.child("web-push")
+  });
+  await webPushManager.initialize();
   const shared = {
     cwd,
-    realtimeHub: new RealtimeHub({ maxRecent: baseConfig.server?.maxRecent ?? 100 }),
+    realtimeHub: new RealtimeHub({
+      maxRecent: baseConfig.server?.maxRecent ?? 100,
+      webPushManager
+    }),
     browserSessionManager: new BrowserSessionManager({
       logger: logger.child("browser"),
       browserConfig: baseConfig.runtime?.browser ?? {},
       cwd
     }),
-    runtimeStateStore: stateStore
+    runtimeStateStore: stateStore,
+    webPushManager
   };
   const authManager = new AuthManager({
     cwd,
@@ -247,6 +257,15 @@ export async function createApp(baseConfig, { cwd = process.cwd() } = {}) {
     },
     getLocalAuthAgentStatus() {
       return authManager.getLocalAgentStatus();
+    },
+    getWebPushPublicKey() {
+      return shared.webPushManager.getPublicKey();
+    },
+    async subscribeWebPush(subscription, options) {
+      return shared.webPushManager.subscribe(subscription, options);
+    },
+    async unsubscribeWebPush(endpoint) {
+      return shared.webPushManager.unsubscribe(endpoint);
     },
     async getDiscoveredSessions() {
       return stateStore.listDiscoveredSessions("wecom-smart-bot");

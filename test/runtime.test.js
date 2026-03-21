@@ -1337,3 +1337,37 @@ test("auth manager releases unclaimed local agent task and allows retry", async 
     await fs.rm(cwd, { recursive: true, force: true });
   }
 });
+
+test("runtime state store persists web push keys and subscriptions", async () => {
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "news-hub-web-push-state-"));
+
+  try {
+    const store = new RuntimeStateStore({ cwd });
+
+    await store.setWebPushVapidKeys({
+      publicKey: "public-key",
+      privateKey: "private-key"
+    });
+    await store.upsertWebPushSubscription({
+      endpoint: "https://push.example.test/subscriptions/1",
+      expirationTime: null,
+      keys: {
+        p256dh: "p256dh-key",
+        auth: "auth-key"
+      },
+      userAgent: "test-agent"
+    });
+
+    const webPushState = await store.getWebPushState();
+    const subscriptions = await store.listWebPushSubscriptions();
+
+    assert.equal(webPushState.vapidKeys.publicKey, "public-key");
+    assert.equal(subscriptions.length, 1);
+    assert.equal(subscriptions[0].endpoint, "https://push.example.test/subscriptions/1");
+
+    await store.removeWebPushSubscription("https://push.example.test/subscriptions/1");
+    assert.equal((await store.listWebPushSubscriptions()).length, 0);
+  } finally {
+    await fs.rm(cwd, { recursive: true, force: true });
+  }
+});
