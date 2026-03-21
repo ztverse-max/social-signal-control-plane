@@ -1166,3 +1166,35 @@ test("auth manager marks expired stored login state as invalid", async () => {
     await fs.rm(cwd, { recursive: true, force: true });
   }
 });
+
+test("auth manager creates a remote login session and exposes viewer path", async () => {
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "news-hub-auth-remote-"));
+
+  try {
+    const manager = new AuthManager({ cwd, logger: createSilentLogger() });
+    manager._runRemoteLoginSession = async () => {};
+
+    const result = await manager.startLogin("douyin", {
+      platforms: {
+        douyin: {
+          source: {
+            storageStatePath: "data/browser/douyin.storage-state.json"
+          }
+        }
+      }
+    });
+
+    assert.equal(result.started, true);
+    assert.match(result.viewerPath, /^\/auth\/session\//);
+
+    const sessionId = result.viewerPath.split("/").pop();
+    const status = manager.getRemoteSessionStatus(sessionId);
+    const html = manager.renderRemoteSessionView(sessionId);
+
+    assert.equal(status.ok, true);
+    assert.equal(status.status, "登录进行中");
+    assert.match(html, /远程登录/);
+  } finally {
+    await fs.rm(cwd, { recursive: true, force: true });
+  }
+});

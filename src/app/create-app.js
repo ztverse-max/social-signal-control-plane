@@ -279,6 +279,18 @@ export async function createApp(baseConfig, { cwd = process.cwd() } = {}) {
     },
     async startPlatformLogin(platformId) {
       return authManager.startLogin(platformId, activeConfig);
+    },
+    getRemoteLoginSessionStatus(sessionId) {
+      return authManager.getRemoteSessionStatus(sessionId);
+    },
+    renderRemoteLoginSession(sessionId) {
+      return authManager.renderRemoteSessionView(sessionId);
+    },
+    async getRemoteLoginSessionSnapshot(sessionId) {
+      return authManager.getRemoteSessionSnapshot(sessionId);
+    },
+    async dispatchRemoteLoginSessionAction(sessionId, action, payload) {
+      return authManager.dispatchRemoteSessionAction(sessionId, action, payload);
     }
   };
 

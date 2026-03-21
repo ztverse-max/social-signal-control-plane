@@ -55,6 +55,15 @@ function sendText(response, statusCode, payload, contentType, headers = {}) {
   response.end(payload);
 }
 
+function sendBinary(response, statusCode, payload, contentType, headers = {}) {
+  response.writeHead(statusCode, {
+    "Content-Type": contentType,
+    "Cache-Control": "no-store",
+    ...headers
+  });
+  response.end(payload);
+}
+
 export function createHttpServer({ config, shared, logger, appContext }) {
   const serverConfig = {
     enabled: true,
@@ -144,6 +153,44 @@ export function createHttpServer({ config, shared, logger, appContext }) {
       if (url.pathname === "/auth/login" && request.method === "POST") {
         const payload = await readJsonBody(request);
         sendJson(response, 200, await appContext.startPlatformLogin(payload.platformId));
+        return;
+      }
+
+      const remoteSessionMatch = url.pathname.match(/^\/auth\/session\/([^/]+)$/);
+      if (remoteSessionMatch && request.method === "GET") {
+        sendText(response, 200, appContext.renderRemoteLoginSession(remoteSessionMatch[1]), "text/html");
+        return;
+      }
+
+      const remoteSessionStatusMatch = url.pathname.match(/^\/auth\/session\/([^/]+)\/status$/);
+      if (remoteSessionStatusMatch && request.method === "GET") {
+        sendJson(response, 200, appContext.getRemoteLoginSessionStatus(remoteSessionStatusMatch[1]));
+        return;
+      }
+
+      const remoteSessionSnapshotMatch = url.pathname.match(/^\/auth\/session\/([^/]+)\/snapshot$/);
+      if (remoteSessionSnapshotMatch && request.method === "GET") {
+        sendBinary(
+          response,
+          200,
+          await appContext.getRemoteLoginSessionSnapshot(remoteSessionSnapshotMatch[1]),
+          "image/png"
+        );
+        return;
+      }
+
+      const remoteSessionActionMatch = url.pathname.match(/^\/auth\/session\/([^/]+)\/action$/);
+      if (remoteSessionActionMatch && request.method === "POST") {
+        const payload = await readJsonBody(request);
+        sendJson(
+          response,
+          200,
+          await appContext.dispatchRemoteLoginSessionAction(
+            remoteSessionActionMatch[1],
+            payload.action,
+            payload
+          )
+        );
         return;
       }
 

@@ -688,12 +688,36 @@ function renderManagedTargets() {
 }
 
 function renderAuthStatuses() {
-  elements.authGrid.innerHTML = state.authStatuses.map((entry) => `<article class="alert ${/失效|未登录|失败/.test(entry.status) ? "danger" : ""}"><div class="alert-title"><span>${escapeHtml(getPlatformDefinition(entry.platformId)?.name || entry.platformId)}</span><span class="status${/失效|未登录|失败/.test(entry.status) ? " danger" : ""}">${escapeHtml(entry.status)}</span></div><p class="muted">${escapeHtml(entry.detail || "")}</p><div class="mini-actions">${entry.requiresLogin ? `<button type="button" class="btn auth-login" data-platform-id="${escapeHtml(entry.platformId)}">开始登录</button>${entry.loginUrl ? `<a class="btn link" href="${escapeHtml(entry.loginUrl)}" target="_blank" rel="noreferrer">打开登录页</a>` : ""}` : '<span class="muted">当前无需额外登录</span>'}</div></article>`).join("") || '<div class="empty">暂无登录状态数据。</div>';
+  const nonDangerStates = new Set([
+    "已保存登录态",
+    "登录态校验中",
+    "登录中",
+    "无需登录"
+  ]);
+
+  elements.authGrid.innerHTML =
+    state.authStatuses
+      .map((entry) => {
+        const danger = !nonDangerStates.has(entry.status);
+        const actions = entry.requiresLogin
+          ? `<button type="button" class="btn auth-login" data-platform-id="${escapeHtml(entry.platformId)}">开始登录</button>${entry.viewerPath ? `<a class="btn link" href="${escapeHtml(entry.viewerPath)}" target="_blank" rel="noreferrer">打开远程工作台</a>` : ""}${entry.loginUrl ? `<a class="btn link" href="${escapeHtml(entry.loginUrl)}" target="_blank" rel="noreferrer">打开平台登录页</a>` : ""}`
+          : '<span class="muted">当前无需额外登录</span>';
+
+        return `<article class="alert ${danger ? "danger" : ""}"><div class="alert-title"><span>${escapeHtml(getPlatformDefinition(entry.platformId)?.name || entry.platformId)}</span><span class="status${danger ? " danger" : ""}">${escapeHtml(entry.status)}</span></div><p class="muted">${escapeHtml(entry.detail || "")}</p><div class="mini-actions">${actions}</div></article>`;
+      })
+      .join("") || '<div class="empty">暂无登录状态数据。</div>';
+
   for (const button of elements.authGrid.querySelectorAll(".auth-login")) {
     button.addEventListener("click", async () => {
       try {
-        const result = await requestJson("/auth/login", { method: "POST", body: JSON.stringify({ platformId: button.getAttribute("data-platform-id") }) });
-        showToast(result.message || "登录流程已启动。");
+        const result = await requestJson("/auth/login", {
+          method: "POST",
+          body: JSON.stringify({ platformId: button.getAttribute("data-platform-id") })
+        });
+        if (result.viewerPath) {
+          window.open(result.viewerPath, "_blank", "noopener,noreferrer");
+        }
+        showToast(result.message || "远程登录工作台已启动。");
         await refreshAuthStatuses();
         renderAuthPanels();
       } catch (error) {
