@@ -137,6 +137,10 @@ function assertChannelPayload(channel) {
     throw new Error("Webhook 渠道需要 url。");
   }
 
+  if (channel.pluginId === "openclaw-weixin" && !channel.target) {
+    throw new Error("微信（OpenClaw）渠道需要填写 target。");
+  }
+
   if (channel.pluginId === "wecom-bot" && !channel.webhookKey && !channel.webhookUrl && !channel.url) {
     throw new Error("企业微信机器人需要 Webhook Key 或完整 Webhook URL，不能只填机器人 ID、企业 ID 或 AgentId。");
   }

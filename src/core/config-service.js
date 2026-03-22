@@ -227,6 +227,14 @@ function summarizeChannel(channel) {
       : "待填写 BotID / Secret / 会话 ID";
   }
 
+  if (channel.pluginId === "openclaw-weixin") {
+    const target = String(channel.target ?? "").trim();
+    const accountId = String(channel.accountId ?? "").trim();
+    return target
+      ? `微信（OpenClaw）：${target}${accountId ? ` / 账号 ${maskSecret(accountId)}` : ""}`
+      : "待填写 target";
+  }
+
   if (channel.pluginId === "webhook") {
     return channel.url ? `Webhook：${channel.url}` : "待填写 Webhook 地址";
   }

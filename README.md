@@ -56,6 +56,7 @@ flowchart LR
 | --- | --- |
 | Browser SSE | 本地页面实时消息流 |
 | Browser Notification | 浏览器原生通知弹窗 |
+| 微信（OpenClaw） | 通过 OpenClaw Gateway + 腾讯微信插件发送到微信 |
 | Telegram | 通过 Bot 推送到指定会话 |
 | WeCom Bot | 通过企业微信群机器人 Webhook 推送到群聊 |
 | WeCom Smart Bot | 通过企业微信智能机器人长连接主动推送到单聊或群聊 |
@@ -201,6 +202,10 @@ NEWS_WECOM_BOT_WEBHOOK_KEY=your-wecom-bot-key
 NEWS_WECOM_BOT_MESSAGE_TYPE=markdown
 NEWS_WECOM_BOT_MENTIONED_MOBILE_LIST=
 NEWS_WECOM_BOT_MENTIONED_LIST=
+NEWS_OPENCLAW_BIN=openclaw
+NEWS_OPENCLAW_WEIXIN_CHANNEL=openclaw-weixin
+NEWS_OPENCLAW_WEIXIN_TARGET=wxid_xxx
+NEWS_OPENCLAW_WEIXIN_ACCOUNT_ID=
 NEWS_WECOM_SMART_BOT_BOT_ID=your-smart-bot-id
 NEWS_WECOM_SMART_BOT_SECRET=your-smart-bot-secret
 NEWS_WECOM_SMART_BOT_CHAT_IDS=userid_or_chatid_1,userid_or_chatid_2
@@ -215,6 +220,48 @@ NEWS_WECOM_SMART_BOT_MESSAGE_TYPE=markdown
 - `WeCom Smart Bot` 是另一条独立通道，使用企业微信智能机器人的 `BotID + Secret` 建立长连接
 - `NEWS_WECOM_SMART_BOT_CHAT_IDS` 支持多个会话 ID；单聊填写用户 `userid`，群聊填写对应 `chatid`
 - 项目会在机器人收到消息或事件后，自动记录最近发现的 `userid / chatid`，可在页面“通知渠道”里直接复制或填入
+- `微信（OpenClaw）` 不是直接调用微信官方 SDK，而是调用本机或服务器上的 `openclaw message send`
+
+## 微信（OpenClaw）接入
+
+你提供的这条命令：
+
+```bash
+npx -y @tencent-weixin/openclaw-weixin-cli@latest install
+```
+
+本质上做的是：
+
+1. 检查本机是否已经安装 `openclaw`
+2. 安装 `@tencent-weixin/openclaw-weixin`
+3. 执行 `openclaw channels login --channel openclaw-weixin`
+4. 重启 `openclaw gateway`
+
+所以它不是直接给本项目调用的微信 SDK，而是一个 **OpenClaw 微信桥接器**。当前项目已经新增了 `openclaw-weixin` 通知渠道，发送时会执行：
+
+```bash
+openclaw message send --channel openclaw-weixin --target <target> --message "<消息内容>"
+```
+
+### 前置步骤
+
+先在要发送微信消息的那台机器上完成：
+
+```bash
+npm install -g openclaw
+npx -y @tencent-weixin/openclaw-weixin-cli@latest install
+```
+
+完成扫码登录后，再在项目里新增“微信（OpenClaw）”渠道，并填写：
+
+- `Target`
+  OpenClaw 识别到的微信目标 ID
+- `Account ID`
+  可选，多微信账号时用于指定账号
+- `OpenClaw 命令`
+  默认 `openclaw`
+- `渠道 ID`
+  默认 `openclaw-weixin`
 
 ## 真实时效说明
 

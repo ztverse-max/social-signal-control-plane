@@ -370,6 +370,16 @@ function channelTypes() {
       ]
     },
     {
+      pluginId: "openclaw-weixin",
+      fields: [
+        { key: "label", label: "渠道名称", placeholder: "例如：微信实时通知" },
+        { key: "target", label: "Target", placeholder: "微信目标 user id / 会话 id" },
+        { key: "accountId", label: "Account ID", placeholder: "可选，多微信账号时指定" },
+        { key: "openclawBin", label: "OpenClaw 命令", placeholder: "默认 openclaw" },
+        { key: "channel", label: "渠道 ID", placeholder: "默认 openclaw-weixin" }
+      ]
+    },
+    {
       pluginId: "wecom-bot",
       fields: [
         { key: "label", label: "渠道名称", placeholder: "例如：企业微信机器人" },
@@ -396,6 +406,10 @@ function channelTypes() {
 function getChannelTypeLabel(pluginId) {
   if (pluginId === "wecom-bot") {
     return "企业微信群机器人";
+  }
+
+  if (pluginId === "openclaw-weixin") {
+    return "微信（OpenClaw）";
   }
 
   if (pluginId === "wecom-smart-bot") {
@@ -742,6 +756,8 @@ function renderChannelFormFields() {
   const config = existing?.config || {};
   const wecomHint = type?.pluginId === "wecom-bot"
     ? `<article class="mini"><div class="mini-head"><strong>填写说明</strong><span class="status">WECOM</span></div><p class="muted">企业微信群机器人这里需要填写 <strong>Webhook Key</strong> 或完整 <strong>Webhook URL</strong>。机器人 ID、企业 ID、AgentId 都不能直接用于推送。</p></article>`
+    : type?.pluginId === "openclaw-weixin"
+      ? `<article class="mini"><div class="mini-head"><strong>填写说明</strong><span class="status">WECHAT</span></div><p class="muted">这个渠道不是直接调用微信 SDK，而是通过 <strong>OpenClaw Gateway</strong> 转发。你需要先安装 <code>openclaw</code>，再安装 <code>@tencent-weixin/openclaw-weixin</code> 插件并完成微信扫码登录。<strong>Target</strong> 填 OpenClaw 识别到的微信目标 ID，<strong>Account ID</strong> 在多微信账号场景下可选。</p></article>`
     : type?.pluginId === "wecom-smart-bot"
       ? `<article class="mini"><div class="mini-head"><strong>填写说明</strong><span class="status">SMART BOT</span></div><p class="muted">企业微信智能机器人使用 <strong>BotID + Secret</strong> 建立长连接，再向指定会话主动发消息。单聊请填写用户的 <strong>userid</strong>，群聊请填写对应的 <strong>chatid</strong>，多个会话可用逗号分隔。</p></article>`
       : "";
@@ -752,7 +768,7 @@ function renderChannelFormFields() {
 }
 
 function renderManagedChannels() {
-  elements.managedChannels.innerHTML = state.settings.channels.map((channel) => `<article class="mini"><div class="mini-head"><strong>${escapeHtml(channel.label || channel.id)}</strong><span class="status">${channel.enabled ? "已启用" : "已停用"}</span></div><p class="muted">${escapeHtml(channel.pluginId)} / ${escapeHtml(channel.summary || "")}</p><div class="mini-actions">${channel.pluginId === "webhook" || channel.pluginId === "telegram" || channel.pluginId === "wecom-bot" || channel.pluginId === "wecom-smart-bot" ? `<button type="button" class="btn edit-channel" data-channel-id="${escapeHtml(channel.id)}">编辑</button>` : ""}${!channel.builtin ? `<button type="button" class="btn remove-channel" data-channel-id="${escapeHtml(channel.id)}">删除</button>` : '<span class="muted">内置渠道</span>'}</div></article>`).join("") || '<div class="empty">暂无通知渠道。</div>';
+  elements.managedChannels.innerHTML = state.settings.channels.map((channel) => `<article class="mini"><div class="mini-head"><strong>${escapeHtml(channel.label || channel.id)}</strong><span class="status">${channel.enabled ? "已启用" : "已停用"}</span></div><p class="muted">${escapeHtml(channel.pluginId)} / ${escapeHtml(channel.summary || "")}</p><div class="mini-actions">${channel.pluginId === "webhook" || channel.pluginId === "telegram" || channel.pluginId === "openclaw-weixin" || channel.pluginId === "wecom-bot" || channel.pluginId === "wecom-smart-bot" ? `<button type="button" class="btn edit-channel" data-channel-id="${escapeHtml(channel.id)}">编辑</button>` : ""}${!channel.builtin ? `<button type="button" class="btn remove-channel" data-channel-id="${escapeHtml(channel.id)}">删除</button>` : '<span class="muted">内置渠道</span>'}</div></article>`).join("") || '<div class="empty">暂无通知渠道。</div>';
   for (const button of elements.managedChannels.querySelectorAll(".edit-channel")) {
     button.addEventListener("click", () => {
       state.editingChannelId = button.getAttribute("data-channel-id");

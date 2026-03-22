@@ -70,6 +70,14 @@ export default {
       chatId: process.env.TELEGRAM_CHAT_ID,
       parseMode: "HTML"
     },
+    "openclaw-weixin": {
+      enabled: false,
+      label: "微信（OpenClaw）",
+      target: process.env.NEWS_OPENCLAW_WEIXIN_TARGET,
+      accountId: process.env.NEWS_OPENCLAW_WEIXIN_ACCOUNT_ID,
+      openclawBin: process.env.NEWS_OPENCLAW_BIN,
+      channel: process.env.NEWS_OPENCLAW_WEIXIN_CHANNEL ?? "openclaw-weixin"
+    },
     "wecom-bot": {
       enabled: false,
       label: "企业微信机器人",

@@ -8,6 +8,7 @@ import test from "node:test";
 import AiBot from "@wecom/aibot-node-sdk";
 
 import { buildSettingsSnapshot, mergeConfigWithState } from "../src/core/config-service.js";
+import { openclawWeixinChannel } from "../src/channels/openclaw-weixin.js";
 import { wecomBotChannel } from "../src/channels/wecom-bot.js";
 import { wecomSmartBotChannel } from "../src/channels/wecom-smart-bot.js";
 import { AuthManager } from "../src/core/auth-manager.js";
@@ -1194,6 +1195,51 @@ test("auth manager returns external login url after remote login removal", async
   } finally {
     await fs.rm(cwd, { recursive: true, force: true });
   }
+});
+
+test("openclaw weixin channel shells out via openclaw message send", async () => {
+  const calls = [];
+  const sender = await openclawWeixinChannel.createSender({
+    channelId: "openclaw-weixin",
+    channelConfig: {
+      target: "wxid_target",
+      accountId: "wx-account-1",
+      channel: "openclaw-weixin",
+      __runner: async (payload) => {
+        calls.push(payload);
+      }
+    },
+    logger: createSilentLogger()
+  });
+
+  await sender.send({
+    id: "event-1",
+    detectedAt: "2026-03-22T10:00:05.000Z",
+    platformId: "weibo",
+    platformName: "微博",
+    target: { id: "人民日报", label: "人民日报" },
+    author: { id: "author-1", name: "人民日报" },
+    message: {
+      title: "测试标题",
+      content: "测试内容",
+      url: "https://example.com/article",
+      publishedAt: "2026-03-22T10:00:00.000Z"
+    }
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command.includes("openclaw"), true);
+  assert.deepEqual(calls[0].args.slice(0, 6), [
+    "message",
+    "send",
+    "--channel",
+    "openclaw-weixin",
+    "--target",
+    "wxid_target"
+  ]);
+  assert.equal(calls[0].args.includes("--account"), true);
+  assert.match(calls[0].args.join("\n"), /标题：测试标题/);
+  assert.match(calls[0].args.join("\n"), /网址：https:\/\/example.com\/article/);
 });
 
 test("auth manager creates local agent login task when agent is online", async () => {
